@@ -1,3 +1,8 @@
+---
+description: Don't Repeat Yourself principles for Rust code
+applyTo: "src/**/*.rs"
+---
+
 # Don't Repeat Yourself (DRY) Code Instructions
 
 - Avoid duplicating code by abstracting common functionality into reusable functions, classes, or modules.

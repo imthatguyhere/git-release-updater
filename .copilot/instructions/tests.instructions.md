@@ -1,3 +1,8 @@
+---
+description: Test Driven Development for Rust source
+applyTo: "src/**/*.rs"
+---
+
 # Test Driven Development Instructions
 
 - When adding new functionality, first write a test that fails due to the missing functionality. Then implement the functionality to make the test pass. Finally, refactor the code as needed while ensuring all tests still pass.

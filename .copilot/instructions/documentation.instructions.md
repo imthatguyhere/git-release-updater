@@ -1,3 +1,8 @@
+---
+description: Keep README.md and FUNCTIONALITY.md in sync with source changes
+applyTo: "src/**/*.rs"
+---
+
 # Documentation Maintenance Instructions
 
 Keep `README.md` and `FUNCTIONALITY.md` synchronized with source changes.
