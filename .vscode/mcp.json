@@ -2,7 +2,7 @@
     "servers": {
         "symdex": {
             "type": "stdio",
-            "command": "symdex",
+            "command": ".venv\\Scripts\\symdex.exe",
             "args": [
                 "serve",
                 "--state-dir",
