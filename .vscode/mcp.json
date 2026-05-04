@@ -1,0 +1,13 @@
+{
+    "servers": {
+        "symdex": {
+            "type": "stdio",
+            "command": "symdex",
+            "args": [
+                "serve",
+                "--state-dir",
+                ".symdex"
+            ]
+        }
+    }
+}
