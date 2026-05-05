@@ -68,9 +68,9 @@ fn test_parse_repo_url_with_dot_git() {
 
 #[test]
 fn test_parse_repo_url_http() {
-    let (owner, repo) = release::parse_repo_url("http://github.com/user/repo").unwrap();
-    assert_eq!(owner, "user");
-    assert_eq!(repo, "repo");
+    let (owner, repo) = release::parse_repo_url("http://github.com/microsoft/winget-create").unwrap();
+    assert_eq!(owner, "microsoft");
+    assert_eq!(repo, "winget-create");
 }
 
 #[test]
@@ -81,12 +81,12 @@ fn test_parse_repo_url_invalid_scheme() {
 
 #[test]
 fn test_parse_repo_url_too_many_parts() {
-    assert!(release::parse_repo_url("https://github.com/user/repo/extra").is_err());
+    assert!(release::parse_repo_url("https://github.com/microsoft/winget-create/extra").is_err());
 }
 
 #[test]
 fn test_parse_repo_url_too_few_parts() {
-    assert!(release::parse_repo_url("https://github.com/user").is_err());
+    assert!(release::parse_repo_url("https://github.com/microsoft").is_err());
 }
 
 //=-- ---------------------------------------------------------------------------
@@ -153,6 +153,7 @@ fn test_find_asset_url_found() {
             git_release_updater::release::GitHubAsset {
                 name: "target.exe".into(),
                 browser_download_url: "https://example.com/target.exe".into(),
+                digest: None,
             },
         ],
     };
@@ -170,6 +171,7 @@ fn test_find_asset_url_case_insensitive() {
             git_release_updater::release::GitHubAsset {
                 name: "MyApp.EXE".into(),
                 browser_download_url: "https://example.com/MyApp.EXE".into(),
+                digest: None,
             },
         ],
     };
@@ -219,4 +221,150 @@ fn test_hash_local_file_known() {
         result.unwrap(),
         "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
     );
+}
+
+//=-- ---------------------------------------------------------------------------
+//=-- sha256_bytes
+//=-- ---------------------------------------------------------------------------
+
+#[test]
+fn test_sha256_bytes_known() {
+    let hash = release::sha256_bytes(b"hello world");
+    assert_eq!(
+        hash,
+        "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+    );
+}
+
+#[test]
+fn test_sha256_bytes_empty() {
+    let hash = release::sha256_bytes(b"");
+    assert_eq!(
+        hash,
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    );
+}
+
+//=-- ---------------------------------------------------------------------------
+//=-- download_bytes / download_and_hash are network-dependent — tested via
+//=-- integration tests with GitHub API in functional testing.
+//=-- ---------------------------------------------------------------------------
+//=-- API URL construction (no network)
+//=-- ---------------------------------------------------------------------------
+
+fn assert_api_url(repo_url: &str, tag: &str, expected: &str) {
+    let (owner, repo) = release::parse_repo_url(repo_url).unwrap();
+    let actual = if tag == "latest" {
+        format!("https://api.github.com/repos/{owner}/{repo}/releases/latest")
+    } else {
+        format!("https://api.github.com/repos/{owner}/{repo}/releases/tags/{tag}")
+    };
+    assert_eq!(actual, expected, "API URL mismatch for repo={repo_url} tag={tag}");
+}
+
+#[test]
+fn test_api_url_latest_default() {
+    assert_api_url(
+        "https://github.com/microsoft/winget-create",
+        "latest",
+        "https://api.github.com/repos/microsoft/winget-create/releases/latest",
+    );
+}
+
+#[test]
+fn test_api_url_latest_trailing_slash() {
+    assert_api_url(
+        "https://github.com/microsoft/winget-create/",
+        "latest",
+        "https://api.github.com/repos/microsoft/winget-create/releases/latest",
+    );
+}
+
+#[test]
+fn test_api_url_latest_dot_git() {
+    assert_api_url(
+        "https://github.com/microsoft/winget-create.git",
+        "latest",
+        "https://api.github.com/repos/microsoft/winget-create/releases/latest",
+    );
+}
+
+#[test]
+fn test_api_url_by_tag() {
+    assert_api_url(
+        "https://github.com/microsoft/winget-create",
+        "v1.2.3",
+        "https://api.github.com/repos/microsoft/winget-create/releases/tags/v1.2.3",
+    );
+}
+
+#[test]
+fn test_api_url_by_tag_with_v() {
+    assert_api_url(
+        "https://github.com/microsoft/winget-create",
+        "v1.0.0-beta",
+        "https://api.github.com/repos/microsoft/winget-create/releases/tags/v1.0.0-beta",
+    )
+}
+
+//=-- ---------------------------------------------------------------------------
+//=-- find_asset + digest
+//=-- ---------------------------------------------------------------------------
+
+#[test]
+fn test_find_asset_returns_full_asset() {
+    let release = git_release_updater::release::GitHubRelease {
+        tag_name: "v1.0".into(),
+        assets: vec![
+            git_release_updater::release::GitHubAsset {
+                name: "tool.exe".into(),
+                browser_download_url: "https://example.com/tool.exe".into(),
+                digest: Some("sha256:abc123".into()),
+            },
+        ],
+    };
+    let asset = release::find_asset(&release, "tool.exe").unwrap();
+    assert_eq!(asset.name, "tool.exe");
+    assert_eq!(asset.browser_download_url, "https://example.com/tool.exe");
+    assert_eq!(asset.digest, Some("sha256:abc123".into()));
+}
+
+#[test]
+fn test_find_asset_digest_none() {
+    let release = git_release_updater::release::GitHubRelease {
+        tag_name: "v1.0".into(),
+        assets: vec![
+            git_release_updater::release::GitHubAsset {
+                name: "tool.exe".into(),
+                browser_download_url: "https://example.com/tool.exe".into(),
+                digest: None,
+            },
+        ],
+    };
+    let asset = release::find_asset(&release, "tool.exe").unwrap();
+    assert!(asset.digest.is_none());
+}
+
+#[test]
+fn test_find_asset_not_found() {
+    let release = git_release_updater::release::GitHubRelease {
+        tag_name: "v1.0".into(),
+        assets: vec![],
+    };
+    assert!(release::find_asset(&release, "missing.exe").is_none());
+}
+
+//=-- ---------------------------------------------------------------------------
+//=-- save_bytes
+//=-- ---------------------------------------------------------------------------
+
+#[test]
+fn test_save_bytes_roundtrip() {
+    let dir = std::env::temp_dir().join("gru_save_test");
+    let path = dir.join("test.bin");
+    let data = b"hello from save test";
+    release::save_bytes(data, &path).unwrap();
+    let read_back = std::fs::read(&path).unwrap();
+    assert_eq!(read_back, data);
+    std::fs::remove_dir_all(&dir).unwrap();
 }
