@@ -1,5 +1,6 @@
 /target
 /dist
+/release
 .symdex/
 
 # Environment files (user secrets, local overrides)
