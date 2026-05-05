@@ -28,6 +28,10 @@ pub fn resolve_exe_path(base: &Path, asset_name: &str) -> PathBuf {
 pub struct GitHubAsset {
     pub name: String,
     pub browser_download_url: String,
+    /// GitHub release asset digest (e.g. "sha256:9f56bb...").
+    /// May not be present on all GitHub instances; `#[serde(default)]` handles that.
+    #[serde(default)]
+    pub digest: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -103,6 +107,13 @@ pub async fn get_latest_release(repo_url: &str) -> Result<GitHubRelease, String>
     request::get_json::<GitHubRelease>(&api_url).await
 }
 
+/// Fetches a release by tag from a GitHub repo.
+pub async fn get_release_by_tag(repo_url: &str, tag: &str) -> Result<GitHubRelease, String> {
+    let (owner, repo) = parse_repo_url(repo_url)?;
+    let api_url = format!("https://api.github.com/repos/{owner}/{repo}/releases/tags/{tag}");
+    request::get_json::<GitHubRelease>(&api_url).await
+}
+
 /// Finds the download URL for a specific asset name inside a release.
 pub fn find_asset_url<'a>(release: &'a GitHubRelease, target_exe: &str) -> Option<&'a str> {
     release
@@ -110,6 +121,15 @@ pub fn find_asset_url<'a>(release: &'a GitHubRelease, target_exe: &str) -> Optio
         .iter()
         .find(|a| a.name.eq_ignore_ascii_case(target_exe))
         .map(|a| a.browser_download_url.as_str())
+}
+
+/// Finds the full asset struct by name inside a release.
+/// Used when digest verification is needed.
+pub fn find_asset<'a>(release: &'a GitHubRelease, target_exe: &str) -> Option<&'a GitHubAsset> {
+    release
+        .assets
+        .iter()
+        .find(|a| a.name.eq_ignore_ascii_case(target_exe))
 }
 
 /// Strips the leading 'v' / 'V' from a tag name and returns the version string.
@@ -127,38 +147,43 @@ fn strip_hash_prefix(h: &str) -> &str {
 }
 
 //=-- ---------------------------------------------------------------------------
-//=-- Download + hash (+ optional save)
+//=-- Download + hash + save (separate steps)
 //=-- ---------------------------------------------------------------------------
 
-/// Downloads a file from `url` and returns its SHA-256 hash as a hex string.
-/// If `save_path` is provided, the downloaded bytes are written to that file.
-pub async fn download_and_hash(url: &str, save_path: Option<&Path>) -> Result<String, String> {
+/// Downloads bytes from `url` into memory. Validates HTTP 2xx.
+pub async fn download_bytes(url: &str) -> Result<Vec<u8>, String> {
     let resp = request::get_bytes(url).await?;
-
     if !(200..300).contains(&resp.status) {
-        return Err(format!(
-            "download failed: HTTP {} from {url}",
-            resp.status
-        ));
+        return Err(format!("download failed: HTTP {} from {url}", resp.status));
     }
+    Ok(resp.body)
+}
 
-    //=-- Hash
+/// Computes SHA-256 of bytes.
+pub fn sha256_bytes(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
-    hasher.update(&resp.body);
-    let hash = hex::encode(hasher.finalize());
+    hasher.update(bytes);
+    hex::encode(hasher.finalize())
+}
 
-    //=-- Save to disk if path given
-    if let Some(path) = save_path {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("cannot create directory '{}': {e}", parent.display()))?;
-        }
-        std::fs::write(path, &resp.body)
-            .map_err(|e| format!("cannot write '{}': {e}", path.display()))?;
-        println!("  Saved: {}", path.display());
+/// Saves bytes to `path`, creating parent dirs.
+pub fn save_bytes(bytes: &[u8], path: &Path) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("cannot create directory '{}': {e}", parent.display()))?;
     }
+    std::fs::write(path, bytes)
+        .map_err(|e| format!("cannot write '{}': {e}", path.display()))?;
+    println!("  Saved: {}", path.display());
+    Ok(())
+}
 
-    Ok(hash)
+/// Downloads a file from `url` and returns its SHA-256 hash + bytes.
+/// Does NOT save to disk — caller decides.
+pub async fn download_and_hash(url: &str) -> Result<(String, Vec<u8>), String> {
+    let bytes = download_bytes(url).await?;
+    let hash = sha256_bytes(&bytes);
+    Ok((hash, bytes))
 }
 
 /// Computes the SHA-256 hash of a local file.
@@ -326,26 +351,43 @@ fn clean_version_string(raw: &str) -> String {
 #[derive(Debug)]
 pub struct CheckResult {
     pub mode: CheckMode,
-    pub latest_tag: String,
-    pub latest_version: String,
+    pub release_tag: String,
+    pub release_version: String,
     pub download_performed: bool,
-    /// Hash of the downloaded file (always set when download happens)
+    pub file_saved: bool,
+    /// Why save was skipped (None if saved or download not needed)
+    pub save_skipped_reason: Option<String>,
+    /// Path where file was actually saved (effective path, not just --output)
+    pub actual_save_path: Option<PathBuf>,
+    /// Hash of the downloaded file (set when download happens)
     pub downloaded_hash: Option<String>,
-    /// Local exe version string (version/both mode)
+    /// Local exe version string
     pub local_version: Option<String>,
-    /// Whether local version starts with remote tag version
+    /// Whether local version starts with release tag version
     pub version_match: Option<bool>,
-    /// Hash of the local exe (hash/both mode)
+    /// Hash of the local exe (taken BEFORE download)
     pub local_hash: Option<String>,
-    /// Whether local hash equals downloaded hash (hash/both mode)
+    /// Whether local hash equals downloaded hash
     pub hash_match: Option<bool>,
-    /// Expected hash from --hash CLI arg (after sha256: prefix stripping)
-    pub expected_hash: Option<String>,
-    /// Whether downloaded hash matches the expected hash
+    /// Digest from GitHub release asset metadata (sha256: prefix stripped)
+    pub github_digest: Option<String>,
+    /// Expected hash from --hash CLI arg (sha256: prefix stripped)
+    pub cli_expected_hash: Option<String>,
+    /// Whether the hash check passed (uses github_digest > cli_expected_hash)
     pub expected_hash_ok: Option<bool>,
 }
 
 /// Runs the configured check.
+///
+/// Flow:
+/// 1. Fetch release (latest or by tag)
+/// 2. Find matching asset (URL + digest)
+/// 3. Pre-download checks (version, local hash)
+/// 4. Download to memory only
+/// 5. Verify download hash against GitHub digest → fail if mismatch
+/// 6. Fall back to --hash verification if no GitHub digest
+/// 7. Require hash source (GitHub digest or --hash) before saving (any mode)
+/// 8. Save to effective output path only if update needed
 pub async fn run_check(
     repo_url: &str,
     target_exe: &str,
@@ -353,31 +395,36 @@ pub async fn run_check(
     mode: CheckMode,
     local_exe: Option<&Path>,
     expected_hash: Option<&str>,
+    output_path: Option<&Path>,
 ) -> Result<CheckResult, String> {
-    //=-- 1. Fetch latest release
-    let release = get_latest_release(repo_url).await?;
-    let latest_tag = release.tag_name.clone();
-    let latest_version = clean_tag(&release.tag_name).to_string();
+    //=-- 1. Fetch release (latest or specific tag)
+    let release = if version_filter == "latest" || version_filter.is_empty() {
+        get_latest_release(repo_url).await?
+    } else {
+        get_release_by_tag(repo_url, version_filter).await?
+    };
+    let release_tag = release.tag_name.clone();
+    let release_version = clean_tag(&release.tag_name).to_string();
 
-    println!("Latest release: {latest_version}  (tag: {latest_tag})");
+    println!("Release: {release_version}  (tag: {release_tag})");
 
-    if version_filter != "latest" {
-        println!("Requested version: {version_filter}");
-    }
-
-    let dl_url = find_asset_url(&release, target_exe).ok_or_else(|| {
+    let asset = find_asset(&release, target_exe).ok_or_else(|| {
         format!(
-            "asset '{target_exe}' not found in release {latest_tag}. Available: {}",
+            "asset '{target_exe}' not found in release {release_tag}. Available: {}",
             release.assets.iter().map(|a| a.name.as_str()).collect::<Vec<_>>().join(", ")
         )
     })?;
+    let dl_url = asset.browser_download_url.as_str();
+    let gh_digest = asset.digest.as_ref().map(|d| strip_hash_prefix(d).to_string());
 
-    //=-- 2. Version check (only in version/both mode)
+    //=-- 2. Pre-download checks (read local BEFORE download)
+
+    //=-- Version check (version/both mode)
     let (local_version, version_match) = if mode.wants_version() {
         if let Some(exe) = local_exe {
             match get_local_version(exe) {
                 Ok(v) => {
-                    let matches = v.starts_with(&latest_version);
+                    let matches = v.starts_with(&release_version);
                     (Some(v), Some(matches))
                 }
                 Err(e) => {
@@ -392,67 +439,115 @@ pub async fn run_check(
         (None, None)
     };
 
-    //=-- 3. Decide if download is needed
-    //=--    hash mode → always download
+    //=-- Local hash (taken BEFORE any download, for hash/both mode)
+    let local_hash = if mode.wants_hash() {
+        local_exe.and_then(|exe| hash_local_file(exe).ok())
+    } else {
+        None
+    };
+
+    //=-- 3. Decide if download needed
+    //=--    hash mode → always download (need remote hash)
     //=--    version/both → download only if version mismatch or unknown
     let needs_download = match &mode {
         CheckMode::Hash => true,
         CheckMode::Version | CheckMode::Both => !version_match.unwrap_or(false),
     };
 
-    //=-- 4. Download and hash (if needed)
-    let (downloaded_hash, local_hash, hash_match, expected_hash_ok) = if needs_download {
-        let save_path = local_exe;
-        let dl_hash = download_and_hash(dl_url, save_path).await?;
+    //=-- 4. Download to memory, verify, then save
+    let (downloaded_hash, hash_match, expected_hash_ok, file_saved, save_skipped_reason,
+         actual_save_path)
+        = if needs_download {
+        let (dl_hash, dl_bytes) = download_and_hash(dl_url).await?;
 
-        //=-- Check against --hash (expected hash) if provided
-        let exp_ok = expected_hash.map(|eh| {
-            let eh = strip_hash_prefix(eh);
-            dl_hash == eh
-        });
+        //=-- Resolve effective save path (--output → EXE_PATH → None)
+        let effective_save = output_path.or(local_exe);
 
-        //=-- Local vs download comparison (only in hash/both mode)
-        let (local_h, h_match) = if mode.wants_hash() {
-            if let Some(exe) = local_exe {
-                match hash_local_file(exe) {
-                    Ok(h) => {
-                        let matches = h == dl_hash;
-                        (Some(h), Some(matches))
-                    }
-                    Err(e) => {
-                        eprintln!("Warning: could not hash local file: {e}");
-                        (None, None)
-                    }
-                }
-            } else {
-                (None, None)
+        //=-- Determine expected hash priority: GitHub digest > --hash > None
+        let (exp_ok, gh_exp_hash) = match (&gh_digest, expected_hash) {
+            (Some(gd), _) => {
+                let matches = dl_hash == *gd;
+                (Some(matches), Some(gd.clone()))
             }
-        } else {
-            //=-- version-only mode: still hash the local file if it exists
-            //=-- for informational purposes, but no comparison needed
-            let local_h = local_exe.and_then(|exe| hash_local_file(exe).ok());
-            (local_h, None)
+            (None, Some(eh)) => {
+                let eh_clean = strip_hash_prefix(eh).to_string();
+                let matches = dl_hash == eh_clean;
+                (Some(matches), Some(eh_clean))
+            }
+            (None, None) => (None, None),
         };
 
-        (Some(dl_hash), local_h, h_match, exp_ok)
-    } else {
-        (None, None, None, None)
-    };
+        //=-- Fail fast if expected hash mismatch
+        if exp_ok == Some(false) {
+            let exp_str = gh_exp_hash.as_deref().unwrap_or("???");
+            return Err(format!(
+                "Hash mismatch! Expected {exp_str}, got {dl_hash}. Download discarded."
+            ));
+        }
 
-    //=-- Strip sha256: prefix from expected_hash for display
-    let expected_hash_display = expected_hash.map(strip_hash_prefix).map(String::from);
+        //=-- Hash comparison (local vs download)
+        let h_match = if mode.wants_hash() {
+            local_hash.as_ref().map(|lh| lh == &dl_hash)
+        } else {
+            None
+        };
+
+        //=-- Decide whether to save
+        //=--   hash mode: save only if hashes differ
+        //=--   version/both: save (version already confirmed outdated)
+        let should_save = match &mode {
+            CheckMode::Hash => h_match != Some(true),
+            CheckMode::Version | CheckMode::Both => true,
+        };
+
+        //=-- Require hash source before saving (any mode)
+        if should_save && gh_digest.is_none() && expected_hash.is_none() {
+            return Err(
+                "Cannot verify download: GitHub asset has no digest and --hash was not provided. ".to_string()
+                    + "Provide --hash to enable integrity verification before saving.",
+            );
+        }
+
+        let (saved, skip_reason, actual_path) = if should_save {
+            match effective_save {
+                Some(path) => {
+                    save_bytes(&dl_bytes, path)?;
+                    (true, None, Some(path.to_path_buf()))
+                }
+                None => (
+                    false,
+                    Some("no output path configured — set EXE_PATH or OUTPUT_PATH".into()),
+                    None,
+                ),
+            }
+        } else {
+            (
+                false,
+                Some("local file hash already matches — no save needed".into()),
+                None,
+            )
+        };
+
+        (Some(dl_hash), h_match, exp_ok, saved, skip_reason, actual_path)
+    } else {
+        (None, None, None, false, None, None)
+    };
 
     Ok(CheckResult {
         mode,
-        latest_tag,
-        latest_version,
+        release_tag,
+        release_version,
         download_performed: needs_download,
+        file_saved,
+        save_skipped_reason,
+        actual_save_path,
         downloaded_hash,
         local_version,
         version_match,
         local_hash,
         hash_match,
-        expected_hash: expected_hash_display,
+        github_digest: gh_digest.clone(),
+        cli_expected_hash: expected_hash.map(strip_hash_prefix).map(String::from),
         expected_hash_ok,
     })
 }
@@ -463,7 +558,7 @@ pub fn print_result(result: &CheckResult) {
     println!("═══════════════════════════════════════");
     println!("  Release Check Results");
     println!("═══════════════════════════════════════");
-    println!("  Release tag:     {}", result.latest_tag);
+    println!("  Release tag:     {}", result.release_tag);
 
     //=-- Version check
     if result.mode.wants_version() {
@@ -476,14 +571,14 @@ pub fn print_result(result: &CheckResult) {
         if let Some(ref lv) = result.local_version {
             println!("    local:   {lv}");
         }
-        println!("    release: {}", result.latest_version);
+        println!("    release: {}", result.release_version);
     }
 
     //=-- Hash check (local vs downloaded)
     if result.mode.wants_hash() && result.download_performed {
         print!("  Hash check:      ");
         match result.hash_match {
-            Some(true) => println!("✓ MATCH"),
+            Some(true) => println!("✓ MATCH (already current)"),
             Some(false) => println!("✗ MISMATCH ⇒ update needed"),
             None => println!("? no local file to compare"),
         }
@@ -495,24 +590,46 @@ pub fn print_result(result: &CheckResult) {
         }
     }
 
-    //=-- Download info
-    if result.download_performed {
+    //=-- GitHub digest check
+    if let Some(ref gd) = result.github_digest {
+        print!("  GitHub digest:   ");
+        match result.expected_hash_ok {
+            Some(true) => println!("✓ MATCH"),
+            Some(false) => println!("✗ MISMATCH — download discarded"),
+            None => println!("? not checked"),
+        }
+        println!("    hash: {gd}");
+    }
+
+    //=-- CLI expected hash (only if no GitHub digest)
+    if result.github_digest.is_none() {
+        if let Some(ref eh) = result.cli_expected_hash {
+            print!("  Expected hash:   ");
+            match result.expected_hash_ok {
+                Some(true) => println!("✓ MATCH"),
+                Some(false) => println!("✗ MISMATCH — download discarded"),
+                None => println!("? not checked"),
+            }
+            println!("    hash: {eh}");
+        }
+    }
+
+    //=-- Download + save info
+    if result.download_performed && result.file_saved {
+        if let Some(ref dh) = result.downloaded_hash {
+            println!("  Download hash:   {dh}");
+        }
+        if let Some(ref ap) = result.actual_save_path {
+            println!("  Saved to:        {}", ap.display());
+        }
+    } else if result.download_performed && !result.file_saved {
+        let reason = result.save_skipped_reason.as_deref().unwrap_or("unknown reason");
+        println!("  Save skipped:    {reason}");
         if let Some(ref dh) = result.downloaded_hash {
             println!("  Download hash:   {dh}");
         }
     } else {
-        println!("  Download:        ✗ not performed (already current)");
-    }
-
-    //=-- Expected hash verification
-    if let Some(ref eh) = result.expected_hash {
-        print!("  Expected hash:   ");
-        match result.expected_hash_ok {
-            Some(true) => println!("✓ MATCH"),
-            Some(false) => println!("✗ MISMATCH"),
-            None => println!("? not checked"),
-        }
-        println!("    hash: {eh}");
+        println!("  Download:        not performed (already current)");
     }
 
     //=-- Summary line
@@ -530,8 +647,10 @@ pub fn print_result(result: &CheckResult) {
         let all_good = result.version_match.unwrap_or(true)
             && result.hash_match.unwrap_or(true)
             && result.expected_hash_ok.unwrap_or(true);
-        if result.download_performed && all_good {
-            println!("  Result: ✓ up-to-date (download matches)");
+        if result.file_saved && all_good {
+            println!("  Result: ✓ saved (file updated)");
+        } else if result.download_performed && !result.file_saved && all_good {
+            println!("  Result: ✓ up-to-date (no save needed)");
         } else if !result.download_performed && all_good {
             println!("  Result: ✓ up-to-date");
         } else {
@@ -595,3 +714,4 @@ mod tests {
         assert_eq!(strip_hash_prefix(""), "");
     }
 }
+ 
