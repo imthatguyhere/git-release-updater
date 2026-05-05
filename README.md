@@ -24,7 +24,10 @@ Configuration is resolved in priority order: **CLI arg > `.env` > default**.
 | `VERSION` | `--version` | Release version tag to check (`latest` or tag) | `latest` |
 | `MODE` | `--mode` | Check mode: `hash`, `version`, or `both` | `both` |
 | `EXE_PATH` | `--exe` | Path to local executable (dir or full path) | _(none — download only)_ |
-| `EXPECTED_HASH` | `--hash` | Expected SHA-256 hash for download verification | _(none — no extra check)_ |
+| `OUTPUT_PATH` | `--output` | Where to save downloaded file (dir or full path). Falls back to `EXE_PATH` | _(none — EXE_PATH used)_ |
+| `EXPECTED_HASH` | `--hash` | Expected SHA-256 hash — fails fatally if mismatch. Falls back to GitHub asset `digest` if available. | _(none — uses GitHub digest)_ |
+
+> **Hash verification priority:** GitHub release asset `digest` field (if present) → `--hash` CLI arg. If neither is available, the download is **not saved** — requires `--hash` to proceed.
 
 ## Usage
 
@@ -33,20 +36,26 @@ Configuration is resolved in priority order: **CLI arg > `.env` > default**.
 cargo run
 
 # Version mode — compare local exe version vs release tag
-cargo run -- --mode version --exe "C:\tools\myapp.exe"
+cargo run -- --mode version --exe "C:\tools\myapp.exe" --output "C:\tools\myapp.exe"
 
-# Hash mode — compare local hash vs downloaded hash
-cargo run -- --mode hash --exe "C:\tools\myapp.exe"
+# Hash mode — compare local hash vs downloaded hash, save only if different
+cargo run -- --mode hash --exe "C:\tools\myapp.exe" --output "C:\tools\myapp.exe"
 
 # Both modes — version check first, hash compare if different
 cargo run -- --mode both --exe "C:\tools\wingetcreate.exe"
 
-# With expected hash integrity check
+# With expected hash integrity check (fatal if mismatch, download discarded)
 cargo run -- --hash "sha256:9f56bb326b852a699296e936c7b40dadfaf3ccff01c8e84ecff89871ecff8e5c"
 
 # Using a directory path for the exe (appends target filename)
 cargo run -- --exe "C:\Programs\MyApp\"
 # resolves to: C:\Programs\MyApp\wingetcreate.exe
+
+# Separate output path from exe path
+cargo run -- --exe "C:\tools\current.exe" --output "C:\tools\updated.exe"
+
+# Specific release tag instead of latest
+cargo run -- --version "v1.10.3.0" --exe "C:\tools\myapp.exe"
 
 # Custom repo + target
 cargo run -- --repo "https://github.com/my-org/my-tool" --target "mytool.exe"
@@ -56,17 +65,23 @@ cargo run -- --repo "https://github.com/my-org/my-tool" --target "mytool.exe"
 
 | Mode | Behavior |
 | - | - |
-| `version` | Checks local exe's FileVersion/ProductVersion against the release tag. Downloads only if version differs. |
-| `hash` | Downloads the release asset, computes SHA-256, compares against local exe hash. Always downloads. |
-| `both` | Version check first (cheap). Downloads + hash compare only if version mismatches. |
+| `version` | Checks local exe's FileVersion/ProductVersion against the release tag. Downloads only if version differs. Saves to output path. |
+| `hash` | Hashes local exe, downloads release to memory, compares hashes. Saves to output path **only if hashes differ**. Skips save if already current. |
+| `both` | Version check first (cheap, no download). Downloads + hash compare only if version mismatches. Saves if update needed. |
+
+> **All modes** verify download integrity against GitHub asset `digest` or `--hash` before saving. Without either, the download is discarded and an error is returned.
 
 ### `.env` example
 
+Copy `.env.example` to `.env` and adjust. Default configuration:
+
 ```env
-REPO_URL=https://github.com/my-org/my-tool
-TARGET_EXE=mytool.exe
-MODE=version
-EXE_PATH=C:\tools\mytool.exe
+REPO_URL=https://github.com/microsoft/winget-create
+TARGET_EXE=wingetcreate.exe
+VERSION=latest
+MODE=both
+EXE_PATH=C:\ProgramData\ITGH\git-release-updater
+OUTPUT_PATH=C:\ProgramData\ITGH\git-release-updater
 ```
 
 ## Output
@@ -94,7 +109,9 @@ Latest release: 1.12.8.0  (tag: v1.12.8.0)
   Version check:   ✓ MATCH
     local:   1.12.8.0
     release: 1.12.8.0
-  Download:        ✗ not performed (already current)
+  GitHub digest:   ✓ MATCH
+    hash: 8bd738851b524885410112678e3771b341c5c716de60fbbecb88ab0a363ed85d
+  Download:        not performed (already current)
 ═══════════════════════════════════════
   Result: ✓ up-to-date
 ═══════════════════════════════════════
