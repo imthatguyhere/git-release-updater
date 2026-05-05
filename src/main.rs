@@ -37,7 +37,13 @@ struct Cli {
     #[arg(long, env = "EXE_PATH")]
     exe: Option<PathBuf>,
 
-    /// Expected SHA-256 hash for the release file (used in hash / both mode)
+    /// Path where to save the downloaded file (dir or full path).
+    /// Falls back to EXE_PATH if not set.
+    #[arg(long, env = "OUTPUT_PATH")]
+    output: Option<PathBuf>,
+
+    /// Expected SHA-256 hash for the release file
+    ///   (fails fatally if mismatch)
     #[arg(long, env = "EXPECTED_HASH")]
     hash: Option<String>,
 }
@@ -71,12 +77,11 @@ async fn main() {
         }
     };
 
-    //=-- Resolve exe path: if it's a directory, append the target filename
-    let local_exe = cli.exe.map(|p| {
-        //=-- We need to clone target before passing to resolve_exe_path
-        //=-- because target may be borrowed later
-        release::resolve_exe_path(&p, &target)
-    });
+    //=-- Resolve exe path (directory → dir + target filename)
+    let local_exe = cli.exe.map(|p| release::resolve_exe_path(&p, &target));
+
+    //=-- Resolve output path (directory → dir + target filename)
+    let output_path = cli.output.map(|p| release::resolve_exe_path(&p, &target));
 
     println!("Repository:  {repo}");
     println!("Target exe:  {target}");
@@ -84,6 +89,9 @@ async fn main() {
     println!("Mode:        {mode_str}");
     if let Some(ref exe) = local_exe {
         println!("Local exe:   {}", exe.display());
+    }
+    if let Some(ref op) = output_path {
+        println!("Output path: {}", op.display());
     }
     if let Some(ref h) = expected_hash {
         println!("Expected hash: {h}");
@@ -97,6 +105,7 @@ async fn main() {
         mode,
         local_exe.as_deref(),
         expected_hash.as_deref(),
+        output_path.as_deref(),
     )
     .await
     {
