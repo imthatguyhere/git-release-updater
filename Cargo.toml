@@ -2,6 +2,7 @@
 name = "git-release-updater"
 version = "0.1.0"
 edition = "2024"
+authors = ["Imthatguyhere (ITGH | Tyler)"]
 
 [dependencies]
 reqwest = { version = "0.13", features = ["json"] }
@@ -14,4 +15,14 @@ sha2 = "0.11"
 hex = "0.4"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.60", features = ["Win32_Storage_FileSystem"] }
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
+
+[build-dependencies]
+winresource = "0.1"
+
+[profile.release]
+opt-level = "z"
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
