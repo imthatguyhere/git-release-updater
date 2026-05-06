@@ -64,7 +64,9 @@ A template configuration file is provided at `.env.example`.
 
 ## Build and Release Packaging
 
-Standard `cargo build --release`. No custom profile settings.
+Standard `cargo build --release` for the Rust build. Release packaging also has a repo-root PowerShell entrypoint at [scripts/build-release.ps1](scripts/build-release.ps1), which runs the release build and copies the binary into `dist/`.
+
+The workspace’s VS Code task configuration marks `Build release script` as the default build task, so `Ctrl+Shift+B` and `Terminal > Run Build Task...` invoke that script when the workspace is open.
 
 ## Modules
 
