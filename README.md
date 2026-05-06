@@ -9,11 +9,7 @@ Check GitHub release versions and file hashes. Downloads and verifies release as
 
 ## Building
 
-```powershell
-cargo build --release
-```
-
-### Repo-root build entrypoint
+### Build Script
 
 Run the release build from the repo root with:
 
