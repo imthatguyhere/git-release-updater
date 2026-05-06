@@ -151,6 +151,37 @@ fn strip_hash_prefix(h: &str) -> &str {
         .unwrap_or(h)
 }
 
+fn hash_eq(left: &str, right: &str) -> bool {
+    strip_hash_prefix(left).eq_ignore_ascii_case(strip_hash_prefix(right))
+}
+
+fn local_hash_matches_expected(
+    local_hash: Option<&String>,
+    github_digest: Option<&String>,
+    expected_hash: Option<&str>,
+) -> Option<bool> {
+    let expected = github_digest
+        .map(String::as_str)
+        .or_else(|| expected_hash.map(strip_hash_prefix));
+
+    match (local_hash, expected) {
+        (Some(local), Some(expected)) => Some(hash_eq(local, expected)),
+        _ => None,
+    }
+}
+
+fn should_download(
+    mode: &CheckMode,
+    version_match: Option<bool>,
+    local_expected_match: Option<bool>,
+) -> bool {
+    match mode {
+        CheckMode::Hash => true,
+        CheckMode::Version => !version_match.unwrap_or(false),
+        CheckMode::Both => local_expected_match != Some(true),
+    }
+}
+
 //=-- ---------------------------------------------------------------------------
 //=-- Download + hash + save (separate steps)
 //=-- ---------------------------------------------------------------------------
@@ -450,13 +481,14 @@ pub async fn run_check(
         None
     };
 
+    let local_expected_match =
+        local_hash_matches_expected(local_hash.as_ref(), gh_digest.as_ref(), expected_hash);
+
     //=-- 3. Decide if download needed
-    //=--    hash mode → always download (need remote hash)
-    //=--    version/both → download only if version mismatch or unknown
-    let needs_download = match &mode {
-        CheckMode::Hash => true,
-        CheckMode::Version | CheckMode::Both => !version_match.unwrap_or(false),
-    };
+    //=--    hash mode -> always download (need remote hash)
+    //=--    version mode -> download only if version mismatch or unknown
+    //=--    both mode -> verify hash too; skip download only when local hash already matches expected digest
+    let needs_download = should_download(&mode, version_match, local_expected_match);
 
     //=-- 4. Download to memory, verify, then save
     let (
@@ -475,12 +507,12 @@ pub async fn run_check(
         //=-- Determine expected hash priority: GitHub digest > --hash > None
         let (exp_ok, gh_exp_hash) = match (&gh_digest, expected_hash) {
             (Some(gd), _) => {
-                let matches = dl_hash == *gd;
+                let matches = hash_eq(&dl_hash, gd);
                 (Some(matches), Some(gd.clone()))
             }
             (None, Some(eh)) => {
                 let eh_clean = strip_hash_prefix(eh).to_string();
-                let matches = dl_hash == eh_clean;
+                let matches = hash_eq(&dl_hash, &eh_clean);
                 (Some(matches), Some(eh_clean))
             }
             (None, None) => (None, None),
@@ -496,17 +528,17 @@ pub async fn run_check(
 
         //=-- Hash comparison (local vs download)
         let h_match = if mode.wants_hash() {
-            local_hash.as_ref().map(|lh| lh == &dl_hash)
+            local_hash.as_ref().map(|lh| hash_eq(lh, &dl_hash))
         } else {
             None
         };
 
         //=-- Decide whether to save
-        //=--   hash mode: save only if hashes differ
-        //=--   version/both: save (version already confirmed outdated)
+        //=--   hash/both: save only if hashes differ
+        //=--   version: save (version already confirmed outdated)
         let should_save = match &mode {
-            CheckMode::Hash => h_match != Some(true),
-            CheckMode::Version | CheckMode::Both => true,
+            CheckMode::Hash | CheckMode::Both => h_match != Some(true),
+            CheckMode::Version => true,
         };
 
         //=-- Require hash source before saving (any mode)
@@ -547,7 +579,14 @@ pub async fn run_check(
             actual_path,
         )
     } else {
-        (None, None, None, false, None, None)
+        (
+            None,
+            local_expected_match,
+            local_expected_match,
+            false,
+            None,
+            None,
+        )
     };
 
     Ok(CheckResult {
@@ -592,7 +631,7 @@ pub fn print_result(result: &CheckResult) {
     }
 
     //=-- Hash check (local vs downloaded)
-    if result.mode.wants_hash() && result.download_performed {
+    if result.mode.wants_hash() && (result.download_performed || result.hash_match.is_some()) {
         print!("  Hash check:      ");
         match result.hash_match {
             Some(true) => println!("✓ MATCH (already current)"),
@@ -604,6 +643,10 @@ pub fn print_result(result: &CheckResult) {
         }
         if let Some(ref dh) = result.downloaded_hash {
             println!("    remote:   {dh}");
+        } else if let Some(ref gd) = result.github_digest {
+            println!("    remote:   {gd}");
+        } else if let Some(ref eh) = result.cli_expected_hash {
+            println!("    remote:   {eh}");
         }
     }
 
@@ -667,7 +710,7 @@ pub fn print_result(result: &CheckResult) {
         let all_good = result.version_match.unwrap_or(true)
             && result.hash_match.unwrap_or(true)
             && result.expected_hash_ok.unwrap_or(true);
-        if result.file_saved && all_good {
+        if result.file_saved {
             println!("  Result: ✓ saved (file updated)");
         } else if result.download_performed && !result.file_saved && all_good {
             println!("  Result: ✓ up-to-date (no save needed)");
@@ -732,5 +775,50 @@ mod tests {
     #[test]
     fn test_strip_hash_prefix_empty() {
         assert_eq!(strip_hash_prefix(""), "");
+    }
+
+    #[test]
+    fn test_hash_eq_ignores_prefix_and_case() {
+        assert!(hash_eq("sha256:ABC123", "abc123"));
+        assert!(hash_eq("ABC123", "SHA256:abc123"));
+        assert!(!hash_eq("abc123", "def456"));
+    }
+
+    #[test]
+    fn test_local_hash_matches_expected_uses_github_digest_first() {
+        let local_hash = "abc123".to_string();
+        let github_digest = "sha256:abc123".to_string();
+        assert_eq!(
+            local_hash_matches_expected(Some(&local_hash), Some(&github_digest), Some("def456")),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn test_local_hash_matches_expected_uses_cli_hash_fallback() {
+        let local_hash = "abc123".to_string();
+        assert_eq!(
+            local_hash_matches_expected(Some(&local_hash), None, Some("sha256:abc123")),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn test_local_hash_matches_expected_unknown_without_hash_source() {
+        let local_hash = "abc123".to_string();
+        assert_eq!(
+            local_hash_matches_expected(Some(&local_hash), None, None),
+            None
+        );
+    }
+
+    #[test]
+    fn test_should_download_both_when_version_matches_but_hash_differs() {
+        assert!(should_download(&CheckMode::Both, Some(true), Some(false)));
+    }
+
+    #[test]
+    fn test_should_download_both_skips_when_local_hash_matches_digest() {
+        assert!(!should_download(&CheckMode::Both, Some(true), Some(true)));
     }
 }
