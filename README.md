@@ -13,11 +13,21 @@ Check GitHub release versions and file hashes. Downloads and verifies release as
 cargo build --release
 ```
 
-### VS Code shortcut
+### Repo-root build entrypoint
 
-Run the release build script from VS Code with the `Build release script` task, or press `Ctrl+Alt+B`.
+Run the release build from the repo root with:
 
-It executes [scripts/build-release.ps1](scripts/build-release.ps1), which builds the release binary and copies it into `dist/`.
+```powershell
+.\scripts\build-release.ps1
+```
+
+That script builds the release binary and copies it into `dist/`.
+
+### VS Code build task
+
+VS Code uses the default build task named `Build release script` in [.vscode/tasks.json](.vscode/tasks.json).
+
+Use `Terminal > Run Build Task...` or the built-in build command `Ctrl+Shift+B` when the workspace is open.
 
 ## Configuration
 
