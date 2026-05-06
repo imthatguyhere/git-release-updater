@@ -2,5 +2,7 @@
 /dist
 .symdex/
 
+.vscode/mcp.json
+
 # Environment files (user secrets, local overrides)
 .env
