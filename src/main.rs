@@ -3,8 +3,14 @@ use git_release_updater::release;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+/// Default directory used when no `EXE_PATH` is provided by CLI or `.env`.
 const DEFAULT_EXE_PATH: &str = r"C:\ProgramData\ITGH\git-release-updater";
 
+/// Reads `.env` lines with a permissive parser for values `dotenvy` may reject.
+///
+/// This fallback preserves unquoted Windows directory paths that end in `\` so
+/// later configuration resolution can still use them after `dotenvy::dotenv()`
+/// loads the variables it accepts.
 fn read_dotenv_lossy() -> HashMap<String, String> {
     let mut values = HashMap::new();
     let Ok(mut dir) = std::env::current_dir() else {
@@ -47,9 +53,9 @@ fn read_dotenv_lossy() -> HashMap<String, String> {
     }
 }
 
-// ---------------------------------------------------------------------------
+//=-----------------------------------------------------------------------------
 //=-- CLI
-// ---------------------------------------------------------------------------
+//=-----------------------------------------------------------------------------
 
 /// Check GitHub release versions and file hashes.
 ///
@@ -93,9 +99,9 @@ struct Cli {
     hash: Option<String>,
 }
 
-// ---------------------------------------------------------------------------
+//=-----------------------------------------------------------------------------
 //=-- Entry point
-// ---------------------------------------------------------------------------
+//=-----------------------------------------------------------------------------
 
 #[tokio::main]
 async fn main() {
