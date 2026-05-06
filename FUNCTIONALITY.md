@@ -64,7 +64,9 @@ A template configuration file is provided at `.env.example`.
 
 ## Build and Release Packaging
 
-Standard `cargo build --release` for the Rust build. Release packaging also has a repo-root PowerShell entrypoint at [scripts/build-release.ps1](scripts/build-release.ps1), which runs the release build and copies the binary into `dist/`.
+Standard `cargo build --release` for the Rust build. The release profile is tuned for executable size with `opt-level = "z"`, fat LTO, one codegen unit, stripped symbols, and abort-on-panic. `reqwest` and `tokio` use reduced feature sets to avoid unused runtime, proxy, charset, HTTP/2, and bundled Rustls/crypto feature weight; HTTPS uses `native-tls-no-alpn`.
+
+Release packaging also has a repo-root PowerShell entrypoint at [scripts/build-release.ps1](scripts/build-release.ps1), which runs the release build, copies the binary into `dist/`, and tries `upx --best --lzma` on the copied executable by default. If UPX is missing or compression fails, packaging warns and keeps the uncompressed executable. Passing `-NoUPX` skips UPX compression.
 
 The workspace’s VS Code task configuration marks `Build release script` as the default build task, so `Ctrl+Shift+B` and `Terminal > Run Build Task...` invoke that script when the workspace is open.
 
@@ -89,7 +91,7 @@ The workspace’s VS Code task configuration marks `Build release script` as the
 ### main
 
 - **Purpose:** Binary entry point. Thin wrapper over the `git_release_updater` library crate.
-- **Public:** `fn main()` — async entry via `#[tokio::main]`.
+- **Public:** `fn main()` — async entry via `#[tokio::main(flavor = "current_thread")]`.
 - **Imports:** `use git_release_updater::release;` — does **not** declare sub-modules directly (they live in `lib.rs`).
 - **Constants:** `DEFAULT_EXE_PATH` — default directory used when no CLI or `.env` `EXE_PATH` is provided.
 - **Key internal functions:** `read_dotenv_lossy()` — fallback `.env` parser that preserves unquoted Windows directory values ending in `\`.
@@ -160,7 +162,7 @@ The workspace’s VS Code task configuration marks `Build release script` as the
 
 ### request
 
-- **Purpose:** HTTP client wrapper. Abstracts `reqwest` for common methods.
+- **Purpose:** HTTP client wrapper. Abstracts `reqwest` for common methods while using minimal reqwest features in release builds.
 - **Types:**
   - `Response` — status code + body string
   - `BytesResponse` — status code + raw byte vector (for binary downloads)
