@@ -1,5 +1,5 @@
 use crate::request;
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
@@ -9,11 +9,16 @@ use std::path::{Path, PathBuf};
 
 /// Resolves the actual exe path from a user-provided path + asset filename.
 ///
-/// If `base` is a directory (ends with separator or is an existing dir),
-/// appends `asset_name`. Otherwise uses `base` as-is (full path with filename).
+/// If `base` is a directory (ends with separator, is an existing dir, or has no
+/// file extension), appends `asset_name`. Otherwise uses `base` as-is (full path
+/// with filename).
 pub fn resolve_exe_path(base: &Path, asset_name: &str) -> PathBuf {
     let base_str = base.to_string_lossy();
-    if base_str.ends_with('/') || base_str.ends_with('\\') || base.is_dir() {
+    if base_str.ends_with('/')
+        || base_str.ends_with('\\')
+        || base.is_dir()
+        || base.extension().is_none()
+    {
         base.join(asset_name)
     } else {
         base.to_path_buf()
@@ -172,8 +177,7 @@ pub fn save_bytes(bytes: &[u8], path: &Path) -> Result<(), String> {
         std::fs::create_dir_all(parent)
             .map_err(|e| format!("cannot create directory '{}': {e}", parent.display()))?;
     }
-    std::fs::write(path, bytes)
-        .map_err(|e| format!("cannot write '{}': {e}", path.display()))?;
+    std::fs::write(path, bytes).map_err(|e| format!("cannot write '{}': {e}", path.display()))?;
     println!("  Saved: {}", path.display());
     Ok(())
 }
@@ -188,8 +192,8 @@ pub async fn download_and_hash(url: &str) -> Result<(String, Vec<u8>), String> {
 
 /// Computes the SHA-256 hash of a local file.
 pub fn hash_local_file(path: &Path) -> Result<String, String> {
-    let mut file = std::fs::File::open(path)
-        .map_err(|e| format!("cannot open '{}': {e}", path.display()))?;
+    let mut file =
+        std::fs::File::open(path).map_err(|e| format!("cannot open '{}': {e}", path.display()))?;
 
     let mut hasher = Sha256::new();
     let mut buf = [0u8; 8192];
@@ -238,8 +242,7 @@ mod win_version {
         let path_wide = wide(path.as_os_str());
 
         let mut dummy: u32 = 0;
-        let info_size =
-            unsafe { GetFileVersionInfoSizeW(path_wide.as_ptr(), &mut dummy) };
+        let info_size = unsafe { GetFileVersionInfoSizeW(path_wide.as_ptr(), &mut dummy) };
 
         if info_size == 0 {
             return None;
@@ -247,7 +250,12 @@ mod win_version {
 
         let mut buf: Vec<u8> = vec![0u8; info_size as usize];
         if unsafe {
-            GetFileVersionInfoW(path_wide.as_ptr(), 0, info_size, buf.as_mut_ptr() as *mut std::ffi::c_void)
+            GetFileVersionInfoW(
+                path_wide.as_ptr(),
+                0,
+                info_size,
+                buf.as_mut_ptr() as *mut std::ffi::c_void,
+            )
         } == 0
         {
             return None;
@@ -275,9 +283,7 @@ mod win_version {
         let lang = unsafe { *(trans_ptr as *const u16) };
         let codepage = unsafe { *(trans_ptr.add(2) as *const u16) };
 
-        let sub_block = format!(
-            "\\StringFileInfo\\{lang:04x}{codepage:04x}\\{key}"
-        );
+        let sub_block = format!("\\StringFileInfo\\{lang:04x}{codepage:04x}\\{key}");
         let sub_block_wide = wide(OsStr::new(&sub_block));
 
         let mut str_ptr: *mut std::ffi::c_void = std::ptr::null_mut();
@@ -297,9 +303,7 @@ mod win_version {
         }
 
         //=-- str_len is in characters, excluding the null terminator
-        let slice = unsafe {
-            std::slice::from_raw_parts(str_ptr as *const u16, str_len as usize)
-        };
+        let slice = unsafe { std::slice::from_raw_parts(str_ptr as *const u16, str_len as usize) };
         String::from_utf16(slice).ok()
     }
 }
@@ -319,12 +323,7 @@ mod win_version {
 pub fn get_local_version(path: &Path) -> Result<String, String> {
     let raw = win_version::get_file_version(path)
         .or_else(|| win_version::get_product_version(path))
-        .ok_or_else(|| {
-            format!(
-                "no version info found in '{}'",
-                path.display()
-            )
-        })?;
+        .ok_or_else(|| format!("no version info found in '{}'", path.display()))?;
 
     Ok(clean_version_string(&raw))
 }
@@ -338,10 +337,7 @@ pub fn get_local_version(_path: &Path) -> Result<String, String> {
 /// - Split at '+' → keep left side
 /// - Remove any remaining '+' characters
 fn clean_version_string(raw: &str) -> String {
-    raw.split('+')
-        .next()
-        .unwrap_or("")
-        .replace('+', "")
+    raw.split('+').next().unwrap_or("").replace('+', "")
 }
 
 //=-- ---------------------------------------------------------------------------
@@ -411,11 +407,19 @@ pub async fn run_check(
     let asset = find_asset(&release, target_exe).ok_or_else(|| {
         format!(
             "asset '{target_exe}' not found in release {release_tag}. Available: {}",
-            release.assets.iter().map(|a| a.name.as_str()).collect::<Vec<_>>().join(", ")
+            release
+                .assets
+                .iter()
+                .map(|a| a.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
         )
     })?;
     let dl_url = asset.browser_download_url.as_str();
-    let gh_digest = asset.digest.as_ref().map(|d| strip_hash_prefix(d).to_string());
+    let gh_digest = asset
+        .digest
+        .as_ref()
+        .map(|d| strip_hash_prefix(d).to_string());
 
     //=-- 2. Pre-download checks (read local BEFORE download)
 
@@ -455,9 +459,14 @@ pub async fn run_check(
     };
 
     //=-- 4. Download to memory, verify, then save
-    let (downloaded_hash, hash_match, expected_hash_ok, file_saved, save_skipped_reason,
-         actual_save_path)
-        = if needs_download {
+    let (
+        downloaded_hash,
+        hash_match,
+        expected_hash_ok,
+        file_saved,
+        save_skipped_reason,
+        actual_save_path,
+    ) = if needs_download {
         let (dl_hash, dl_bytes) = download_and_hash(dl_url).await?;
 
         //=-- Resolve effective save path (--output → EXE_PATH → None)
@@ -503,7 +512,8 @@ pub async fn run_check(
         //=-- Require hash source before saving (any mode)
         if should_save && gh_digest.is_none() && expected_hash.is_none() {
             return Err(
-                "Cannot verify download: GitHub asset has no digest and --hash was not provided. ".to_string()
+                "Cannot verify download: GitHub asset has no digest and --hash was not provided. "
+                    .to_string()
                     + "Provide --hash to enable integrity verification before saving.",
             );
         }
@@ -528,7 +538,14 @@ pub async fn run_check(
             )
         };
 
-        (Some(dl_hash), h_match, exp_ok, saved, skip_reason, actual_path)
+        (
+            Some(dl_hash),
+            h_match,
+            exp_ok,
+            saved,
+            skip_reason,
+            actual_path,
+        )
     } else {
         (None, None, None, false, None, None)
     };
@@ -623,7 +640,10 @@ pub fn print_result(result: &CheckResult) {
             println!("  Saved to:        {}", ap.display());
         }
     } else if result.download_performed && !result.file_saved {
-        let reason = result.save_skipped_reason.as_deref().unwrap_or("unknown reason");
+        let reason = result
+            .save_skipped_reason
+            .as_deref()
+            .unwrap_or("unknown reason");
         println!("  Save skipped:    {reason}");
         if let Some(ref dh) = result.downloaded_hash {
             println!("  Download hash:   {dh}");
@@ -714,4 +734,3 @@ mod tests {
         assert_eq!(strip_hash_prefix(""), "");
     }
 }
- 
