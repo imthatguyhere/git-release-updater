@@ -103,7 +103,7 @@ struct Cli {
 //=-- Entry point
 //=-----------------------------------------------------------------------------
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() {
     let dotenv_values = read_dotenv_lossy();
 
