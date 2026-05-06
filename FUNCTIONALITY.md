@@ -88,6 +88,8 @@ The workspace’s VS Code task configuration marks `Build release script` as the
 - **Purpose:** Binary entry point. Thin wrapper over the `git_release_updater` library crate.
 - **Public:** `fn main()` — async entry via `#[tokio::main]`.
 - **Imports:** `use git_release_updater::release;` — does **not** declare sub-modules directly (they live in `lib.rs`).
+- **Constants:** `DEFAULT_EXE_PATH` — default directory used when no CLI or `.env` `EXE_PATH` is provided.
+- **Key internal functions:** `read_dotenv_lossy()` — fallback `.env` parser that preserves unquoted Windows directory values ending in `\`.
 - **Key algorithms:** Configuration prioritization (CLI > `.env` > default).
 
 ### release
@@ -123,7 +125,12 @@ The workspace’s VS Code task configuration marks `Build release script` as the
   - **Safety sequence:** Local hash taken **before** download. Bytes downloaded to memory only. Hash verified before save (GitHub digest priority → `--hash` fallback). If neither hash source is available, download is discarded with error — no file written. Hash mismatch returns `Err`.
   - **Hash source priority:** GitHub release asset `digest` field (auto-detected from API response) → `--hash` CLI arg. If a save is needed and neither is available, the operation fails.
   - **Hash/both mode save logic:** Save only if local hash differs from download hash. If hashes match, the local file is already current — no overwrite needed.
-- **Module-level functions (private):** `clean_version_string(raw) -> String` — splits at `+`, removes all `+` characters.
+- **Module-level functions (private):**
+  - `strip_hash_prefix(h) -> &str` — normalizes optional `sha256:` / `SHA256:` prefixes.
+  - `hash_eq(left, right) -> bool` — compares normalized hashes case-insensitively.
+  - `local_hash_matches_expected(local_hash, github_digest, expected_hash) -> Option<bool>` — compares local hash against the highest-priority expected release hash.
+  - `should_download(mode, version_match, local_expected_match) -> bool` — centralizes mode-specific download decisions, including `both` mode hash validation.
+  - `clean_version_string(raw) -> String` — splits at `+`, removes all `+` characters.
 - **Sub-modules:**
   - `win_version` (Windows only): `get_file_version(path)`, `get_product_version(path)` — wraps Win32 version API calls.
 
