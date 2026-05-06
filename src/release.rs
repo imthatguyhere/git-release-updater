@@ -57,6 +57,7 @@ pub enum CheckMode {
 }
 
 impl CheckMode {
+    /// Parses a check mode string into its enum variant.
     pub fn from_str(s: &str) -> Result<Self, String> {
         match s.to_lowercase().as_str() {
             "hash" => Ok(Self::Hash),
@@ -68,10 +69,12 @@ impl CheckMode {
         }
     }
 
+    /// Returns whether this mode performs hash comparison or verification.
     pub fn wants_hash(&self) -> bool {
         matches!(self, Self::Hash | Self::Both)
     }
 
+    /// Returns whether this mode performs PE version comparison.
     pub fn wants_version(&self) -> bool {
         matches!(self, Self::Version | Self::Both)
     }
@@ -151,10 +154,15 @@ fn strip_hash_prefix(h: &str) -> &str {
         .unwrap_or(h)
 }
 
+/// Compares two SHA-256 strings after normalizing optional `sha256:` prefixes.
 fn hash_eq(left: &str, right: &str) -> bool {
     strip_hash_prefix(left).eq_ignore_ascii_case(strip_hash_prefix(right))
 }
 
+/// Compares the local file hash against the best available expected release hash.
+///
+/// GitHub asset digest takes priority over a CLI `--hash` value so the check
+/// matches the integrity verification priority used before saving downloads.
 fn local_hash_matches_expected(
     local_hash: Option<&String>,
     github_digest: Option<&String>,
@@ -170,6 +178,10 @@ fn local_hash_matches_expected(
     }
 }
 
+/// Determines whether the selected mode needs to download the release asset.
+///
+/// `Both` mode uses the local hash comparison against the expected release hash,
+/// so a matching version alone never skips hash validation.
 fn should_download(
     mode: &CheckMode,
     version_match: Option<bool>,
@@ -263,12 +275,17 @@ mod win_version {
         get_string_version(path, "FileVersion")
     }
 
+    /// Converts an OS string into a null-terminated UTF-16 buffer for Win32 APIs.
     fn wide(s: &OsStr) -> Vec<u16> {
         let mut v: Vec<u16> = s.encode_wide().collect();
         v.push(0);
         v
     }
 
+    /// Reads a version resource string value from a PE file.
+    ///
+    /// The function first queries the file's language/codepage translation table,
+    /// then reads the requested key from that localized string table.
     fn get_string_version(path: &Path, key: &str) -> Option<String> {
         let path_wide = wide(path.as_os_str());
 
