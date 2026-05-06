@@ -13,6 +13,12 @@ Check GitHub release versions and file hashes. Downloads and verifies release as
 cargo build --release
 ```
 
+### VS Code shortcut
+
+Run the release build script from VS Code with the `Build release script` task, or press `Ctrl+Alt+B`.
+
+It executes [scripts/build-release.ps1](scripts/build-release.ps1), which builds the release binary and copies it into `dist/`.
+
 ## Configuration
 
 Configuration is resolved in priority order: **CLI arg > `.env` > default**.
