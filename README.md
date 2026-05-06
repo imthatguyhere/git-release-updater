@@ -137,12 +137,12 @@ Latest release: 1.12.8.0  (tag: v1.12.8.0)
 
 ```md
 lib (crate root — defines all modules)
-  ├── release (check orchestration)
-  │       ├── GitHub API helpers
-  │       ├── download + SHA-256 hashing
-  │       └── PE version extraction (Windows)
+  ├── download (asset download + save helpers)
+  ├── hash (SHA-256 hashing + hash comparison helpers)
+  ├── release (GitHub release helpers + check orchestration)
   ├── request (HTTP client)
-  └── util (helpers, timestamps)
+  ├── util (helpers, timestamps)
+  └── version (release tag cleaning + PE version extraction)
 
 main (thin binary — imports from lib)
   └── calls lib modules, parses CLI, prints results
@@ -152,11 +152,14 @@ main (thin binary — imports from lib)
 
 | Module | Crate | Purpose |
 | - | - | - |
-| `lib` | library | Crate root. Re-exports `release`, `request`, `util` as public API. |
+| `lib` | library | Crate root. Re-exports `download`, `hash`, `release`, `request`, `util`, `version` as public API. |
 | `main` | binary | Entry point, `.env` loading, CLI parsing. Thin wrapper over the library. |
-| `release` | library | GitHub API types, check modes, version/hash logic, download, file save |
+| `download` | library | Release asset download, download hashing, and verified file save helpers |
+| `hash` | library | SHA-256 byte/file hashing and normalized hash comparison helpers |
+| `release` | library | GitHub API types, asset lookup, check modes, check orchestration, result formatting |
 | `request` | library | HTTP client wrapper (raw GET, JSON GET, binary GET) |
 | `util` | library | Reusable utility functions (timestamps, string helpers, date math) |
+| `version` | library | Release tag cleanup and Windows PE FileVersion/ProductVersion extraction |
 
 ## Tracked Software
 
