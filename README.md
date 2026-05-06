@@ -87,7 +87,7 @@ cargo run -- --repo "https://github.com/my-org/my-tool" --target "mytool.exe"
 | - | - |
 | `version` | Checks local exe's FileVersion/ProductVersion against the release tag. Downloads only if version differs. Saves to output path. |
 | `hash` | Hashes local exe, downloads release to memory, compares hashes. Saves to output path **only if hashes differ**. Skips save if already current. |
-| `both` | Version check first (cheap, no download). Downloads + hash compare only if version mismatches. Saves if update needed. |
+| `both` | Checks version and hash. If the local hash already matches the GitHub digest or `--hash`, skips download. Otherwise downloads, verifies integrity, and saves only if the downloaded hash differs from the local file. |
 
 > **All modes** verify download integrity against GitHub asset `digest` or `--hash` before saving. Without either, the download is discarded and an error is returned.
 
