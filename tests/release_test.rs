@@ -6,19 +6,34 @@ use git_release_updater::release;
 
 #[test]
 fn test_check_mode_from_str_hash() {
-    assert_eq!(release::CheckMode::from_str("hash"), Ok(release::CheckMode::Hash));
-    assert_eq!(release::CheckMode::from_str("HASH"), Ok(release::CheckMode::Hash));
-    assert_eq!(release::CheckMode::from_str("Hash"), Ok(release::CheckMode::Hash));
+    assert_eq!(
+        release::CheckMode::from_str("hash"),
+        Ok(release::CheckMode::Hash)
+    );
+    assert_eq!(
+        release::CheckMode::from_str("HASH"),
+        Ok(release::CheckMode::Hash)
+    );
+    assert_eq!(
+        release::CheckMode::from_str("Hash"),
+        Ok(release::CheckMode::Hash)
+    );
 }
 
 #[test]
 fn test_check_mode_from_str_version() {
-    assert_eq!(release::CheckMode::from_str("version"), Ok(release::CheckMode::Version));
+    assert_eq!(
+        release::CheckMode::from_str("version"),
+        Ok(release::CheckMode::Version)
+    );
 }
 
 #[test]
 fn test_check_mode_from_str_both() {
-    assert_eq!(release::CheckMode::from_str("both"), Ok(release::CheckMode::Both));
+    assert_eq!(
+        release::CheckMode::from_str("both"),
+        Ok(release::CheckMode::Both)
+    );
 }
 
 #[test]
@@ -47,28 +62,32 @@ fn test_check_mode_wants_version() {
 
 #[test]
 fn test_parse_repo_url_https() {
-    let (owner, repo) = release::parse_repo_url("https://github.com/microsoft/winget-create").unwrap();
+    let (owner, repo) =
+        release::parse_repo_url("https://github.com/microsoft/winget-create").unwrap();
     assert_eq!(owner, "microsoft");
     assert_eq!(repo, "winget-create");
 }
 
 #[test]
 fn test_parse_repo_url_with_trailing_slash() {
-    let (owner, repo) = release::parse_repo_url("https://github.com/microsoft/winget-create/").unwrap();
+    let (owner, repo) =
+        release::parse_repo_url("https://github.com/microsoft/winget-create/").unwrap();
     assert_eq!(owner, "microsoft");
     assert_eq!(repo, "winget-create");
 }
 
 #[test]
 fn test_parse_repo_url_with_dot_git() {
-    let (owner, repo) = release::parse_repo_url("https://github.com/microsoft/winget-create.git").unwrap();
+    let (owner, repo) =
+        release::parse_repo_url("https://github.com/microsoft/winget-create.git").unwrap();
     assert_eq!(owner, "microsoft");
     assert_eq!(repo, "winget-create");
 }
 
 #[test]
 fn test_parse_repo_url_http() {
-    let (owner, repo) = release::parse_repo_url("http://github.com/microsoft/winget-create").unwrap();
+    let (owner, repo) =
+        release::parse_repo_url("http://github.com/microsoft/winget-create").unwrap();
     assert_eq!(owner, "microsoft");
     assert_eq!(repo, "winget-create");
 }
@@ -136,6 +155,24 @@ fn test_resolve_exe_path_dir_forward_slash() {
 }
 
 #[test]
+fn test_resolve_exe_path_dir_without_trailing_separator() {
+    let p = release::resolve_exe_path(&std::path::Path::new("C:\\tools"), "myapp.exe");
+    assert_eq!(p, std::path::Path::new("C:\\tools\\myapp.exe"));
+}
+
+#[test]
+fn test_resolve_exe_path_nested_dir_without_trailing_separator() {
+    let p = release::resolve_exe_path(
+        &std::path::Path::new("C:\\kworking\\cdk-drive-updater"),
+        "cdk-drive-updater.exe",
+    );
+    assert_eq!(
+        p,
+        std::path::Path::new("C:\\kworking\\cdk-drive-updater\\cdk-drive-updater.exe")
+    );
+}
+
+#[test]
 fn test_resolve_exe_path_relative_dir() {
     let p = release::resolve_exe_path(&std::path::Path::new("target\\debug\\"), "wingetcreate.exe");
     assert_eq!(p, std::path::Path::new("target\\debug\\wingetcreate.exe"));
@@ -149,13 +186,11 @@ fn test_resolve_exe_path_relative_dir() {
 fn test_find_asset_url_found() {
     let release = git_release_updater::release::GitHubRelease {
         tag_name: "v1.0".into(),
-        assets: vec![
-            git_release_updater::release::GitHubAsset {
-                name: "target.exe".into(),
-                browser_download_url: "https://example.com/target.exe".into(),
-                digest: None,
-            },
-        ],
+        assets: vec![git_release_updater::release::GitHubAsset {
+            name: "target.exe".into(),
+            browser_download_url: "https://example.com/target.exe".into(),
+            digest: None,
+        }],
     };
     assert_eq!(
         release::find_asset_url(&release, "target.exe"),
@@ -167,13 +202,11 @@ fn test_find_asset_url_found() {
 fn test_find_asset_url_case_insensitive() {
     let release = git_release_updater::release::GitHubRelease {
         tag_name: "v1.0".into(),
-        assets: vec![
-            git_release_updater::release::GitHubAsset {
-                name: "MyApp.EXE".into(),
-                browser_download_url: "https://example.com/MyApp.EXE".into(),
-                digest: None,
-            },
-        ],
+        assets: vec![git_release_updater::release::GitHubAsset {
+            name: "MyApp.EXE".into(),
+            browser_download_url: "https://example.com/MyApp.EXE".into(),
+            digest: None,
+        }],
     };
     assert_eq!(
         release::find_asset_url(&release, "myapp.exe"),
@@ -207,7 +240,10 @@ fn test_hash_local_file_empty() {
     std::fs::write(&path, []).unwrap();
     let result = release::hash_local_file(&path);
     std::fs::remove_file(&path).unwrap();
-    assert_eq!(result.unwrap(), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+    assert_eq!(
+        result.unwrap(),
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    );
 }
 
 #[test]
@@ -259,7 +295,10 @@ fn assert_api_url(repo_url: &str, tag: &str, expected: &str) {
     } else {
         format!("https://api.github.com/repos/{owner}/{repo}/releases/tags/{tag}")
     };
-    assert_eq!(actual, expected, "API URL mismatch for repo={repo_url} tag={tag}");
+    assert_eq!(
+        actual, expected,
+        "API URL mismatch for repo={repo_url} tag={tag}"
+    );
 }
 
 #[test]
@@ -315,13 +354,11 @@ fn test_api_url_by_tag_with_v() {
 fn test_find_asset_returns_full_asset() {
     let release = git_release_updater::release::GitHubRelease {
         tag_name: "v1.0".into(),
-        assets: vec![
-            git_release_updater::release::GitHubAsset {
-                name: "tool.exe".into(),
-                browser_download_url: "https://example.com/tool.exe".into(),
-                digest: Some("sha256:abc123".into()),
-            },
-        ],
+        assets: vec![git_release_updater::release::GitHubAsset {
+            name: "tool.exe".into(),
+            browser_download_url: "https://example.com/tool.exe".into(),
+            digest: Some("sha256:abc123".into()),
+        }],
     };
     let asset = release::find_asset(&release, "tool.exe").unwrap();
     assert_eq!(asset.name, "tool.exe");
@@ -333,13 +370,11 @@ fn test_find_asset_returns_full_asset() {
 fn test_find_asset_digest_none() {
     let release = git_release_updater::release::GitHubRelease {
         tag_name: "v1.0".into(),
-        assets: vec![
-            git_release_updater::release::GitHubAsset {
-                name: "tool.exe".into(),
-                browser_download_url: "https://example.com/tool.exe".into(),
-                digest: None,
-            },
-        ],
+        assets: vec![git_release_updater::release::GitHubAsset {
+            name: "tool.exe".into(),
+            browser_download_url: "https://example.com/tool.exe".into(),
+            digest: None,
+        }],
     };
     let asset = release::find_asset(&release, "tool.exe").unwrap();
     assert!(asset.digest.is_none());
