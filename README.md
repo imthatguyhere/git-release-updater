@@ -19,6 +19,16 @@ Run the release build from the repo root with:
 
 That script builds the release binary and copies it into `dist/`.
 
+The release profile is size-focused: optimized for size, single codegen unit, fat LTO, stripped symbols, and abort-on-panic. Network dependencies are built with reduced feature sets.
+
+UPX compression runs by default when `upx` is available on `PATH`. If UPX is missing or compression fails, the script warns and leaves the executable uncompressed. To skip UPX explicitly, run:
+
+```powershell
+.\scripts\build-release.ps1 -NoUPX
+```
+
+UPX can reduce file size further, but it may increase antivirus scrutiny in some environments. Use `-NoUPX` when that tradeoff is unwanted.
+
 ### VS Code build task
 
 VS Code uses the default build task named `Build release script` in [.vscode/tasks.json](.vscode/tasks.json).
@@ -157,7 +167,7 @@ main (thin binary — imports from lib)
 | `download` | library | Release asset download, download hashing, and verified file save helpers |
 | `hash` | library | SHA-256 byte/file hashing and normalized hash comparison helpers |
 | `release` | library | GitHub API types, asset lookup, check modes, check orchestration, result formatting |
-| `request` | library | HTTP client wrapper (raw GET, JSON GET, binary GET) |
+| `request` | library | HTTP client wrapper (raw GET, JSON GET, binary GET) using minimal reqwest features |
 | `util` | library | Reusable utility functions (timestamps, string helpers, date math) |
 | `version` | library | Release tag cleanup and Windows PE FileVersion/ProductVersion extraction |
 
