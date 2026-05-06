@@ -31,7 +31,7 @@ Use `Terminal > Run Build Task...` or the built-in build command `Ctrl+Shift+B` 
 
 ## Configuration
 
-Configuration is resolved in priority order: **CLI arg > `.env` > default**.
+Configuration is resolved in priority order: **CLI arg > `.env` > default**. Windows paths in `.env` may be written unquoted, including directory paths ending in `\`.
 
 | Variable | CLI flag | Description | Default |
 | - | - | - | - |
@@ -39,8 +39,8 @@ Configuration is resolved in priority order: **CLI arg > `.env` > default**.
 | `TARGET_EXE` | `--target` | Executable name in release assets | `wingetcreate.exe` |
 | `VERSION` | `--version` | Release version tag to check (`latest` or tag) | `latest` |
 | `MODE` | `--mode` | Check mode: `hash`, `version`, or `both` | `both` |
-| `EXE_PATH` | `--exe` | Path to local executable (dir or full path) | _(none — download only)_ |
-| `OUTPUT_PATH` | `--output` | Where to save downloaded file (dir or full path). Falls back to `EXE_PATH` | _(none — EXE_PATH used)_ |
+| `EXE_PATH` | `--exe` | Path to local executable (dir or full path) | `C:\ProgramData\ITGH\git-release-updater` |
+| `OUTPUT_PATH` | `--output` | Where to save downloaded file (dir or full path). Falls back to `EXE_PATH` | _(uses EXE_PATH)_ |
 | `EXPECTED_HASH` | `--hash` | Expected SHA-256 hash — fails fatally if mismatch. Falls back to GitHub asset `digest` if available. | _(none — uses GitHub digest)_ |
 
 > **Hash verification priority:** GitHub release asset `digest` field (if present) → `--hash` CLI arg. If neither is available, the download is **not saved** — requires `--hash` to proceed.
@@ -65,6 +65,10 @@ cargo run -- --hash "sha256:9f56bb326b852a699296e936c7b40dadfaf3ccff01c8e84ecff8
 
 # Using a directory path for the exe (appends target filename)
 cargo run -- --exe "C:\Programs\MyApp\"
+# resolves to: C:\Programs\MyApp\wingetcreate.exe
+
+# Extensionless paths are treated as directories too
+cargo run -- --exe "C:\Programs\MyApp"
 # resolves to: C:\Programs\MyApp\wingetcreate.exe
 
 # Separate output path from exe path
