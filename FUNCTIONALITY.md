@@ -15,19 +15,19 @@ main (binary entry: cli.parse + dotenv)
         │
         ├── [pre-download checks]
         │     ├── [version check]
-        │     │     ├── release::get_local_version()
+        │     │     ├── version::get_local_version()
         │     │     │     └── win_version::get_file_version / get_product_version
-        │     │     └── release::clean_tag() + release::clean_version_string()
+        │     │     └── version::clean_tag() + version::clean_version_string()
         │     └── [local hash taken BEFORE download]
-        │           └── release::hash_local_file()
+        │           └── hash::hash_local_file()
         │
         ├── [download to memory only]
-        │     ├── request::get_bytes()     → Vec<u8>
-        │     └── release::sha256_bytes()  → hex hash
+        │     ├── download::download_bytes() → request::get_bytes() → Vec<u8>
+        │     └── hash::sha256_bytes()       → hex hash
         │
         ├── [verify download against hash source]
-        │     ├── release asset `digest` (priority) ↛ release::strip_hash_prefix()
-        │     ├── --hash CLI arg (fallback) ↛ release::strip_hash_prefix()
+        │     ├── release asset `digest` (priority) ↛ hash::strip_hash_prefix()
+        │     ├── --hash CLI arg (fallback) ↛ hash::strip_hash_prefix()
         │     ├── both absent ↛ Err (discard, don't save)
         │     └── mismatch ↛ Err (discard, don't save)
         │
@@ -35,7 +35,7 @@ main (binary entry: cli.parse + dotenv)
         │     └── skip save if hashes match
         │
         └── [save to disk (only after verification)]
-              └── release::save_bytes(path)
+            └── download::save_bytes(path)
 ```
 
 ## Configuration
@@ -76,12 +76,15 @@ The workspace’s VS Code task configuration marks `Build release script` as the
 - **Declaration:**
 
   ```rust
+  pub mod download;
+  pub mod hash;
   pub mod release;
   pub mod request;
   pub mod util;
+  pub mod version;
   ```
 
-- **Public:** Re-exports everything from `release`, `request`, `util` under the `git_release_updater` crate namespace.
+- **Public:** Re-exports everything from `download`, `hash`, `release`, `request`, `util`, and `version` under the `git_release_updater` crate namespace.
 
 ### main
 
@@ -92,9 +95,42 @@ The workspace’s VS Code task configuration marks `Build release script` as the
 - **Key internal functions:** `read_dotenv_lossy()` — fallback `.env` parser that preserves unquoted Windows directory values ending in `\`.
 - **Key algorithms:** Configuration prioritization (CLI > `.env` > default).
 
+### download
+
+- **Purpose:** Owns release asset download and save operations. Downloads are kept in memory until the orchestrator verifies hash integrity and decides whether to write to disk.
+- **Public functions:**
+  - `download_bytes(url) -> Result<Vec<u8>>` — downloads raw bytes via `request::get_bytes()` and requires an HTTP 2xx status.
+  - `save_bytes(bytes, path)` — creates parent directories and writes bytes to disk.
+  - `download_and_hash(url) -> Result<(String, Vec<u8>)>` — downloads bytes and computes their SHA-256 with `hash::sha256_bytes()`.
+- **Key algorithms:** Separates retrieval from persistence so `release::run_check()` can verify integrity before saving.
+
+### hash
+
+- **Purpose:** Owns SHA-256 hashing and normalized hash comparison behavior.
+- **Public functions:**
+  - `sha256_bytes(bytes) -> String` — computes SHA-256 for in-memory bytes.
+  - `hash_local_file(path) -> Result<String>` — streams a local file in 8KB chunks and computes SHA-256.
+- **Module-level functions (private to crate):**
+  - `strip_hash_prefix(h) -> &str` — normalizes optional `sha256:` / `SHA256:` prefixes.
+  - `hash_eq(left, right) -> bool` — compares normalized hashes case-insensitively.
+  - `local_hash_matches_expected(local_hash, github_digest, expected_hash) -> Option<bool>` — compares local hash against the highest-priority expected release hash.
+- **Key algorithms:** GitHub release asset digest takes priority over CLI `--hash`; both sources are normalized before comparison.
+
+### version
+
+- **Purpose:** Owns release tag cleanup and local PE version extraction.
+- **Public functions:**
+  - `clean_tag(tag) -> &str` — strips leading `v`/`V` prefix.
+  - `get_local_version(path) -> Result<String>` — extracts version from a PE file via Win32 API on Windows; returns an unsupported-platform error elsewhere.
+- **Module-level functions (private):**
+  - `clean_version_string(raw) -> String` — splits at `+`, keeps the left side, and removes remaining `+` characters.
+- **Sub-modules:**
+  - `win_version` (Windows only): `get_file_version(path)`, `get_product_version(path)` — wraps Win32 version API calls. Internal helpers include `wide(s)`, which prepares null-terminated UTF-16 strings, and `get_string_version(path, key)`, which reads localized version-resource string values.
+- **Key algorithms:** Local version comparison uses FileVersion first, ProductVersion fallback, then metadata cleanup before comparing against the cleaned release tag.
+
 ### release
 
-- **Purpose:** Core release-checking logic. Fetches GitHub release metadata, downloads release assets, computes SHA-256 hashes, extracts PE version info, compares local vs remote, and formats results.
+- **Purpose:** Core release-checking orchestration. Fetches GitHub release metadata, selects assets, delegates downloading/hashing/version extraction to focused modules, compares local vs remote, and formats results.
 - **Types:**
   - `CheckMode` — enum: `Hash`, `Version`, `Both`
   - `CheckResult` — holds all comparison results and download metadata. Fields include `github_digest` (from GitHub asset metadata), `cli_expected_hash` (from `--hash` arg), `actual_save_path` (effective save location), `save_skipped_reason` (why save was skipped), `expected_hash_ok` (whether the hash check passed).
@@ -107,18 +143,12 @@ The workspace’s VS Code task configuration marks `Build release script` as the
   - `get_release_by_tag(repo_url, tag) -> Result<GitHubRelease>` — fetches a specific release by tag from GitHub API
   - `find_asset_url(release, target_exe) -> Option<&str>` — finds a release asset's download URL by name
   - `find_asset(release, target_exe) -> Option<&GitHubAsset>` — returns the full asset struct (including `digest`)
-  - `clean_tag(tag) -> &str` — strips leading `v`/`V` prefix
-  - `download_bytes(url) -> Result<Vec<u8>>` — downloads to memory only, validates HTTP 2xx
-  - `sha256_bytes(bytes) -> String` — computes SHA-256 of a byte slice
-  - `save_bytes(bytes, path)` — writes bytes to disk, creates parent dirs
-  - `download_and_hash(url) -> Result<(String, Vec<u8>)>` — downloads to memory, returns (hash, bytes)
-  - `hash_local_file(path) -> Result<String>` — computes SHA-256 of a local file (streaming, 8KB buffer)
-  - `get_local_version(path) -> Result<String>` — extracts version from a PE file via Win32 API
   - `run_check(...) -> Result<CheckResult>` — main orchestration function
   - `print_result(result)` — formats the check result to stdout
   - `CheckMode::from_str(s) -> Result<Self>` — parses mode string
   - `CheckMode::wants_hash() -> bool`
   - `CheckMode::wants_version() -> bool`
+- **Compatibility re-exports:** `release` still re-exports `clean_tag`, `get_local_version`, `download_bytes`, `download_and_hash`, `save_bytes`, `sha256_bytes`, and `hash_local_file` from their focused modules for existing callers.
 - **Key algorithms:**
   - **Version comparison:** Local PE version extracted via `GetFileVersionInfoSizeW` / `GetFileVersionInfoW` / `VerQueryValueW`. Falls back FileVersion → ProductVersion. Cleans metadata: split at `+`, keep left, strip remaining `+`. Compared via `starts_with` against the cleaned release tag.
   - **Download decision:** `hash` mode always downloads. `version` mode skips download if local version already matches the release tag. `both` mode also checks the local hash against the GitHub digest or `--hash`; it skips download only when the local hash already matches the expected release hash.
@@ -126,13 +156,7 @@ The workspace’s VS Code task configuration marks `Build release script` as the
   - **Hash source priority:** GitHub release asset `digest` field (auto-detected from API response) → `--hash` CLI arg. If a save is needed and neither is available, the operation fails.
   - **Hash/both mode save logic:** Save only if local hash differs from download hash. If hashes match, the local file is already current — no overwrite needed.
 - **Module-level functions (private):**
-  - `strip_hash_prefix(h) -> &str` — normalizes optional `sha256:` / `SHA256:` prefixes.
-  - `hash_eq(left, right) -> bool` — compares normalized hashes case-insensitively.
-  - `local_hash_matches_expected(local_hash, github_digest, expected_hash) -> Option<bool>` — compares local hash against the highest-priority expected release hash.
   - `should_download(mode, version_match, local_expected_match) -> bool` — centralizes mode-specific download decisions, including `both` mode hash validation.
-  - `clean_version_string(raw) -> String` — splits at `+`, removes all `+` characters.
-- **Sub-modules:**
-  - `win_version` (Windows only): `get_file_version(path)`, `get_product_version(path)` — wraps Win32 version API calls. Internal helpers include `wide(s)`, which prepares null-terminated UTF-16 strings, and `get_string_version(path, key)`, which reads localized version-resource string values.
 
 ### request
 
