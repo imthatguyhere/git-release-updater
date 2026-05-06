@@ -119,10 +119,10 @@ The workspace’s VS Code task configuration marks `Build release script` as the
   - `CheckMode::wants_version() -> bool`
 - **Key algorithms:**
   - **Version comparison:** Local PE version extracted via `GetFileVersionInfoSizeW` / `GetFileVersionInfoW` / `VerQueryValueW`. Falls back FileVersion → ProductVersion. Cleans metadata: split at `+`, keep left, strip remaining `+`. Compared via `starts_with` against the cleaned release tag.
-  - **Download decision:** `hash` mode always downloads. `version`/`both` mode skips download if local version already matches the release tag.
+  - **Download decision:** `hash` mode always downloads. `version` mode skips download if local version already matches the release tag. `both` mode also checks the local hash against the GitHub digest or `--hash`; it skips download only when the local hash already matches the expected release hash.
   - **Safety sequence:** Local hash taken **before** download. Bytes downloaded to memory only. Hash verified before save (GitHub digest priority → `--hash` fallback). If neither hash source is available, download is discarded with error — no file written. Hash mismatch returns `Err`.
   - **Hash source priority:** GitHub release asset `digest` field (auto-detected from API response) → `--hash` CLI arg. If a save is needed and neither is available, the operation fails.
-  - **Hash mode save logic:** Save only if local hash differs from download hash. If hashes match, the local file is already current — no overwrite needed.
+  - **Hash/both mode save logic:** Save only if local hash differs from download hash. If hashes match, the local file is already current — no overwrite needed.
 - **Module-level functions (private):** `clean_version_string(raw) -> String` — splits at `+`, removes all `+` characters.
 - **Sub-modules:**
   - `win_version` (Windows only): `get_file_version(path)`, `get_product_version(path)` — wraps Win32 version API calls.
