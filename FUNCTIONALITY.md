@@ -43,7 +43,7 @@ main (binary entry: cli.parse + dotenv)
 Configuration sources, in priority order:
 
 1. CLI flags (highest)
-2. `.env` file (loaded via `dotenvy::dotenv()` — copy `.env.example` to `.env`)
+2. `.env` file (loaded via `dotenvy::dotenv()` plus a line-based fallback that preserves unquoted Windows paths ending in `\` — copy `.env.example` to `.env`)
 3. Built-in defaults
 
 | Variable | CLI flag | Default | Description |
@@ -58,7 +58,7 @@ Configuration sources, in priority order:
 
 > **Hash source priority:** GitHub release asset `digest` field (auto-detected) → `--hash` CLI arg. If neither is available and a save is needed, the download is discarded with an error — `--hash` must be provided to proceed.
 
-The `--exe` / `--output` paths are resolved by `resolve_exe_path()`: if it's a directory (trailing separator or existing dir), the `TARGET_EXE` filename is appended. With the default `EXE_PATH`, the effective path becomes `C:\ProgramData\ITGH\git-release-updater\wingetcreate.exe`.
+The `--exe` / `--output` paths are resolved by `resolve_exe_path()`: if it's a directory (trailing separator, existing dir, or extensionless path), the `TARGET_EXE` filename is appended. With the default `EXE_PATH`, the effective path becomes `C:\ProgramData\ITGH\git-release-updater\wingetcreate.exe`.
 
 A template configuration file is provided at `.env.example`.
 
@@ -99,7 +99,7 @@ The workspace’s VS Code task configuration marks `Build release script` as the
   - `GitHubAsset` — deserialized from GitHub API: `name`, `browser_download_url`, `digest` (optional `sha256:` hex string from GitHub release listing).
   - `GitHubRelease` — deserialized from GitHub API: `tag_name`, `assets`
 - **Public functions:**
-  - `resolve_exe_path(base, asset_name) -> PathBuf` — resolves a path that may be a directory or a full file path
+  - `resolve_exe_path(base, asset_name) -> PathBuf` — resolves a path that may be a directory or a full file path. Directory intent is detected from trailing separators, existing directories, or extensionless paths.
   - `parse_repo_url(url) -> Result<(String, String)>` — extracts owner/repo from a GitHub URL
   - `get_latest_release(repo_url) -> Result<GitHubRelease>` — fetches latest release from GitHub API
   - `get_release_by_tag(repo_url, tag) -> Result<GitHubRelease>` — fetches a specific release by tag from GitHub API
