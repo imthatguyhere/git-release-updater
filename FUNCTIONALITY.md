@@ -132,7 +132,7 @@ The workspace’s VS Code task configuration marks `Build release script` as the
   - `should_download(mode, version_match, local_expected_match) -> bool` — centralizes mode-specific download decisions, including `both` mode hash validation.
   - `clean_version_string(raw) -> String` — splits at `+`, removes all `+` characters.
 - **Sub-modules:**
-  - `win_version` (Windows only): `get_file_version(path)`, `get_product_version(path)` — wraps Win32 version API calls.
+  - `win_version` (Windows only): `get_file_version(path)`, `get_product_version(path)` — wraps Win32 version API calls. Internal helpers include `wide(s)`, which prepares null-terminated UTF-16 strings, and `get_string_version(path, key)`, which reads localized version-resource string values.
 
 ### request
 
